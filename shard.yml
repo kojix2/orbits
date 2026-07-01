@@ -1,0 +1,16 @@
+name: orbits
+version: 0.1.0
+
+authors:
+  - kojix2
+
+description: |
+  Render strange attractors directly in modern terminals.
+
+crystal: ">= 1.20.0"
+
+license: MIT
+
+targets:
+  orbits:
+    main: src/orbits_cli.cr

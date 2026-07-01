@@ -1,0 +1,119 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Set package variables
+        shell: bash
+        run: |
+          echo "VERSION=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          echo "BIN=orbits" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: shards install --without-development
+
+      - name: Run specs
+        run: crystal spec
+
+      - name: Build on Linux (musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          docker run -d --name alpine \
+            -v "$PWD:/workspace" -w /workspace \
+            crystallang/crystal:latest-alpine tail -f /dev/null
+          docker exec alpine apk add --no-cache pcre2-static zlib-static
+          docker exec alpine shards install --without-development --release --static
+          docker exec alpine shards build --release --no-debug --static -Dexecution_context
+          docker exec alpine strip "bin/$BIN"
+          ldd "bin/$BIN" || echo "Static binary (no dynamic dependencies)"
+          file "bin/$BIN"
+          "bin/$BIN" --help
+          "bin/$BIN" --version
+
+          PKG="orbits-${VERSION}-${{ matrix.target }}"
+          mkdir -p "$PKG"
+          cp "bin/$BIN" "$PKG/"
+          cp LICENSE "$PKG/LICENSE"
+          cp README.md "$PKG/"
+          tar czf "$PKG.tar.gz" "$PKG"
+
+      - name: Build on macOS
+        if: endsWith(matrix.target, 'apple-darwin')
+        shell: bash
+        run: |
+          brew install libgc pcre2
+          ln -s "$(brew --prefix libgc)/lib/libgc.a" .
+          ln -s "$(brew --prefix pcre2)/lib/libpcre2-8.a" .
+          STATIC_LIBS="-L $(pwd) $(pwd)/libgc.a $(pwd)/libpcre2-8.a -Wl,-search_paths_first"
+          shards build --release --no-debug -Dexecution_context --link-flags="$STATIC_LIBS"
+          strip "bin/$BIN"
+          otool -L "bin/$BIN"
+          if otool -L "bin/$BIN" | grep -E '/opt/homebrew|/usr/local'; then
+            echo "Error: Homebrew runtime dependency detected"
+            exit 1
+          fi
+          file "bin/$BIN"
+          "bin/$BIN" --help
+          "bin/$BIN" --version
+
+          PKG="orbits-${VERSION}-${{ matrix.target }}"
+          mkdir -p "$PKG"
+          cp "bin/$BIN" "$PKG/"
+          cp LICENSE "$PKG/LICENSE"
+          cp README.md "$PKG/"
+          tar czf "$PKG.tar.gz" "$PKG"
+
+      - name: Build on Windows (MSVC)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          shards build --release --no-debug --static -Dexecution_context
+          llvm-strip "bin/$env:BIN.exe"
+          & "bin/$env:BIN.exe" --help
+          & "bin/$env:BIN.exe" --version
+
+          $pkg = "orbits-$env:VERSION-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $pkg
+          Copy-Item "bin/$env:BIN.exe" "$pkg/"
+          Copy-Item LICENSE "$pkg/LICENSE"
+          Copy-Item README.md "$pkg/"
+          Compress-Archive -Path "$pkg/*" -DestinationPath "$pkg.zip"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            orbits-*.tar.gz
+            orbits-*.zip

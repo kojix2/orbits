@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  crystal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Show toolchain
+        run: |
+          crystal --version
+          shards --version
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Run specs
+        run: crystal spec
+
+      - name: Build with execution context
+        run: make static=0
+
+      - name: Run binary
+        run: |
+          bin/orbits --help
+          bin/orbits --version
+          bin/orbits ikeda --protocol braille --size 100x100
+          bin/orbits dejong --colormap ice -o random.png
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbits
+          path: bin/orbits
+
+      - name: Upload random image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: random.png
+          path: random.png
