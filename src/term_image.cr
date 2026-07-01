@@ -1,0 +1,12 @@
+require "base64"
+require "compress/zlib"
+
+require "./term_image/image"
+require "./term_image/png"
+require "./term_image/detector"
+require "./term_image/tmux"
+require "./term_image/iterm2"
+require "./term_image/kitty"
+require "./term_image/sixel"
+require "./term_image/text"
+require "./term_image/protocol"
