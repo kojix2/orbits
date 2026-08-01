@@ -46,8 +46,9 @@ module Orbits
     private def report_start(config : Config) : Nil
       return if config.quiet? || !STDERR.tty?
       orbits = config.orbits == 1 ? "1 orbit" : "#{config.orbits} orbits"
+      seed = config.seed ? " — seed #{config.seed}" : ""
       STDERR.puts "[orbits] rendering #{config.attractor.to_s.downcase} — " \
-                  "#{config.points.format} points, #{orbits}, #{config.width}x#{config.height}"
+                  "#{config.points.format} points, #{orbits}, #{config.width}x#{config.height}#{seed}"
     end
 
     private def report_done(config : Config, elapsed : Time::Span, action : String) : Nil
@@ -296,8 +297,12 @@ module Orbits
     # also selects an attractor, then picks coefficients likely to render well.
     # One RNG drives every stage for complete --seed reproduction.
     private def apply_random_selection(config : Config, state : ParseState) : Nil
-      seed = state.seed
-      rng = seed.nil? ? Random.new : Random.new(seed)
+      # Generate the seed explicitly even when the user did not provide one.
+      # Keeping it on the config lets the UI show the value needed to recreate
+      # an otherwise one-off random draw.
+      seed = state.seed || Random.rand(UInt64)
+      config.seed = seed
+      rng = Random.new(seed)
       unless state.attractor_selected?
         attractors = AttractorKind.values
         selected = attractors[rng.rand(attractors.size)]

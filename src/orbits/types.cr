@@ -126,6 +126,7 @@ module Orbits
     property colormap : Colormap
     property protocol : TermImage::Protocol
     property output : String?
+    property seed : UInt64?
     property? print_params : Bool
     property? detect_only : Bool
     property? quiet : Bool
@@ -157,6 +158,7 @@ module Orbits
                    @colormap = DEFAULT_COLORMAP,
                    @protocol = TermImage::Protocol::Auto,
                    @output = nil,
+                   @seed = nil,
                    @print_params = false,
                    @detect_only = false,
                    @quiet = false)

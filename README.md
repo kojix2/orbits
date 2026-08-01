@@ -24,7 +24,8 @@ orbits hopalong
 
 Without an attractor subcommand, `orbits` randomly selects the attractor. The
 parameters and colormap are randomized with or without a subcommand. Use
-`--seed N` to reproduce the complete selection.
+`--seed N` to reproduce the complete selection. Interactive runs show the
+generated seed in the render status, and `--print-params` includes it too.
 
 Tune the orbit when you want the image back:
 

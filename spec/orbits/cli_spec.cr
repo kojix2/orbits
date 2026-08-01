@@ -265,6 +265,18 @@ describe Orbits::CLI do
     first.colormap.should eq(second.colormap)
     first.params.should eq(second.params)
     first.window.should eq(second.window)
+    first.seed.should eq(42_u64)
+  end
+
+  it "exposes an automatically generated seed that reproduces an unseeded draw" do
+    first = Orbits::CLI.parse_config([] of String)
+    seed = first.seed.should_not be_nil
+    second = Orbits::CLI.parse_config(["--seed=#{seed}"])
+
+    second.attractor.should eq(first.attractor)
+    second.colormap.should eq(first.colormap)
+    second.params.should eq(first.params)
+    second.window.should eq(first.window)
   end
 
   it "rejects the removed random option" do
@@ -346,6 +358,8 @@ describe Orbits::CLI do
       status.success?.should be_true
       printed = error.to_s
       printed.should contain("reproduce ->")
+      printed.should contain("seed      42")
+      printed.should contain("--seed 42")
       printed.should contain("--orbits 4")
       printed.should contain("--xform log")
       printed.should contain("--colormap ")

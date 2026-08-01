@@ -45,6 +45,9 @@ module Orbits
         output << format_float(window.xmin) << ", " << format_float(window.xmax) << "]"
         output << "   y [" << format_float(window.ymin) << ", " << format_float(window.ymax) << "]\n"
         output << "  " << "colormap".ljust(METADATA_WIDTH) << "  " << @config.colormap.cli_name << "\n\n"
+        if seed = @config.seed
+          output << "  " << "seed".ljust(METADATA_WIDTH) << "  " << seed << "\n\n"
+        end
       end
 
       # Only parameters used by the selected map belong in the summary.
@@ -73,6 +76,7 @@ module Orbits
           end
 
           output << "orbits " << @config.attractor.cli_name
+          append_argument.call("--seed #{@config.seed}") if @config.seed
           append_parameters(append_argument)
           append_argument.call("--xy #{params.x0},#{params.y0}") unless params.x0.zero? && params.y0.zero?
           if theta = params.theta
