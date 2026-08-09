@@ -7,7 +7,7 @@ authors:
 description: |
   Render strange attractors directly in modern terminals.
 
-crystal: ">= 1.20.0"
+crystal: ">= 1.21.0"
 
 license: MIT
 

@@ -23,6 +23,16 @@ describe TermImage::Kitty do
     s.should contain("a=T")
     s.should contain("\e\\")
   end
+
+  it "addresses replaceable animation frames and deletes them afterward" do
+    io = IO::Memory.new
+    image = TermImage::RGBA.new(1, 1, Bytes[255, 0, 0, 255])
+    TermImage::Kitty.write(io, image, image_id: 42_u32, placement_id: 7_u32, move_cursor: false)
+    TermImage::Kitty.delete(io, 42_u32)
+
+    io.to_s.should contain("i=42,p=7,C=1")
+    io.to_s.should contain("a=d,d=I,i=42")
+  end
 end
 
 describe TermImage::Sixel do
@@ -119,6 +129,41 @@ describe TermImage do
       else
         ENV.delete("TMUX")
       end
+    end
+  end
+
+  it "plays frames in an alternate screen and restores the cursor" do
+    io = IO::Memory.new
+    palette = StaticArray(UInt32, 256).new { |i| (i.to_u32 << 16) | (i.to_u32 << 8) | i.to_u32 }
+    image = TermImage::Indexed.new(1, 1, Bytes[255], palette)
+    writer = TermImage::FrameWriter.new(TermImage::Protocol::Shades, io)
+
+    writer.start
+    writer.write(image)
+    writer.finish
+
+    io.to_s.should start_with("\e[?1049h\e[?25l\e[H")
+    io.to_s.should contain("█")
+    io.to_s.should end_with("\e[?25h\e[?1049l")
+  end
+
+  it "does not tmux-wrap text animation frames" do
+    previous = ENV["TMUX"]?
+    ENV["TMUX"] = "/tmp/tmux-test"
+    io = IO::Memory.new
+    palette = StaticArray(UInt32, 256).new { |i| (i.to_u32 << 16) | (i.to_u32 << 8) | i.to_u32 }
+    image = TermImage::Indexed.new(1, 1, Bytes[255], palette)
+    writer = TermImage::FrameWriter.new(TermImage::Protocol::Shades, io)
+
+    writer.write(image)
+    writer.finish
+
+    io.to_s.should_not contain("\ePtmux;")
+  ensure
+    if value = previous
+      ENV["TMUX"] = value
+    else
+      ENV.delete("TMUX")
     end
   end
 end

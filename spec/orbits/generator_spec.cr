@@ -13,6 +13,16 @@ describe Orbits::Generator do
     points[0][1].should be_close(0.9, 1e-12)
   end
 
+  it "continues a stateful orbit across batches" do
+    params = Orbits::Params.new(1.5, -1.8, 1.6, 0.9)
+    orbit = Orbits::Orbit.new(Orbits::AttractorKind::Clifford, params)
+    batched = [orbit.next_point, orbit.next_point, orbit.next_point]
+    generated = [] of {Float64, Float64}
+    Orbits::Generator.new(params).each_point(3) { |x, y| generated << {x, y} }
+
+    batched.should eq(generated)
+  end
+
   it "generates De Jong points" do
     params = Orbits::Params.new(1.4, -2.3, 2.4, -2.1)
     points = [] of {Float64, Float64}

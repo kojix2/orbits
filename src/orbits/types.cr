@@ -1,4 +1,24 @@
 module Orbits
+  enum AnimationMode
+    Reveal
+    Trail
+    Morph
+
+    def self.parse(value : String) : self
+      case value.downcase
+      when "reveal" then Reveal
+      when "trail"  then Trail
+      when "morph"  then Morph
+      else
+        raise ArgumentError.new("unknown animation mode: #{value} (choose from reveal, trail, morph)")
+      end
+    end
+
+    def cli_name : String
+      to_s.downcase
+    end
+  end
+
   enum Xform
     Boolean
     Linear
@@ -130,22 +150,35 @@ module Orbits
     property? print_params : Bool
     property? detect_only : Bool
     property? quiet : Bool
+    property animation : AnimationMode?
+    property fps : Int32
+    property duration : Float64
+    property trail_points : Int64
+    property morph_amount : Float64
+    property? window_explicit : Bool
 
     # Single source of truth for the rendering defaults. Anything that needs to
     # know "is this value still the default?" (help text, the --print-params
     # reproduce command) reads these rather than repeating the literal, so a
     # change here can never silently drift out of sync with a copy elsewhere.
-    DEFAULT_ATTRACTOR = AttractorKind::DeJong
-    DEFAULT_POINTS    = 10_000_000_i64
-    DEFAULT_ORBITS    =              1
-    DEFAULT_WIDTH     =            640
-    DEFAULT_HEIGHT    =            640
-    BRAILLE_WIDTH     =            120
-    BRAILLE_HEIGHT    =            120
-    SHADES_WIDTH      =             60
-    SHADES_HEIGHT     =             30
-    DEFAULT_XFORM     = Xform::Equalized
-    DEFAULT_COLORMAP  = Colormap::Gray
+    DEFAULT_ATTRACTOR    = AttractorKind::DeJong
+    DEFAULT_POINTS       = 10_000_000_i64
+    DEFAULT_ORBITS       =              1
+    DEFAULT_WIDTH        =            640
+    DEFAULT_HEIGHT       =            640
+    BRAILLE_WIDTH        =            120
+    BRAILLE_HEIGHT       =            120
+    SHADES_WIDTH         =             60
+    SHADES_HEIGHT        =             30
+    DEFAULT_XFORM        = Xform::Equalized
+    DEFAULT_COLORMAP     = Colormap::Gray
+    DEFAULT_FPS          =             12
+    DEFAULT_DURATION     =            5.0
+    DEFAULT_TRAIL_POINTS =     10_000_i64
+    DEFAULT_TRAIL_BUDGET =    100_000_i64
+    DEFAULT_MORPH_POINTS =  1_000_000_i64
+    MAX_TRAIL_POINTS     = 10_000_000_i64
+    DEFAULT_MORPH_AMOUNT =            1.0
 
     def initialize(@attractor = DEFAULT_ATTRACTOR,
                    params : Params? = nil,
@@ -161,16 +194,41 @@ module Orbits
                    @seed = nil,
                    @print_params = false,
                    @detect_only = false,
-                   @quiet = false)
+                   @quiet = false,
+                   @animation = nil,
+                   @fps = DEFAULT_FPS,
+                   @duration = DEFAULT_DURATION,
+                   @trail_points = DEFAULT_TRAIL_POINTS,
+                   @morph_amount = DEFAULT_MORPH_AMOUNT,
+                   window_explicit : Bool? = nil)
       @params = params || @attractor.default_params
       @window = window || @attractor.default_window
+      @window_explicit = window_explicit.nil? ? !window.nil? : window_explicit
     end
 
     def validate! : Nil
+      validate_rendering!
+      validate_animation! if @animation
+    end
+
+    private def validate_rendering! : Nil
       raise ArgumentError.new("points must be positive") if @points < 1
       raise ArgumentError.new("orbits must be positive") if @orbits < 1
       raise ArgumentError.new("width must be positive") if @width < 1
       raise ArgumentError.new("height must be positive") if @height < 1
+    end
+
+    private def validate_animation! : Nil
+      raise ArgumentError.new("fps must be positive") if @fps < 1
+      raise ArgumentError.new("duration must be finite and positive") unless @duration.finite? && @duration > 0.0
+      raise ArgumentError.new("trail point count must be positive") if @trail_points < 1
+      raise ArgumentError.new("trail point count must not exceed #{MAX_TRAIL_POINTS}") if @trail_points > MAX_TRAIL_POINTS
+      unless @morph_amount.finite? && @morph_amount > 0.0
+        raise ArgumentError.new("morph amount must be finite and positive")
+      end
+      if @animation && @output
+        raise ArgumentError.new("animation cannot be combined with --output yet")
+      end
     end
   end
 end

@@ -16,31 +16,6 @@ module Orbits
   module RandomParams
     extend self
 
-    # Which coefficients to draw for an attractor, and over what range. A nil
-    # field is left at the attractor's default — either the map ignores that
-    # coefficient, or it is not meant to vary. This is sampling policy, tuned
-    # from bench/random_survey.cr, so it lives here with random selection
-    # rather than in the attractor's mathematical definition.
-    private record CoefficientRanges,
-      a : Range(Float64, Float64)? = nil,
-      b : Range(Float64, Float64)? = nil,
-      c : Range(Float64, Float64)? = nil,
-      d : Range(Float64, Float64)? = nil
-
-    # Per-attractor draw ranges, all in one place. `case ... in` stays
-    # exhaustive, so adding an attractor won't compile until its ranges are set.
-    private def coefficient_ranges(kind : AttractorKind) : CoefficientRanges
-      case kind
-      in .clifford?, .de_jong?
-        CoefficientRanges.new(a: -3.0..3.0, b: -3.0..3.0, c: -3.0..3.0, d: -3.0..3.0)
-      in .ikeda?
-        CoefficientRanges.new(a: 0.6..0.95) # only u = a is used
-      in .hopalong?
-        # d is unused; the auto-fitted window absorbs Hopalong's wide scale.
-        CoefficientRanges.new(a: -2.0..2.0, b: -2.0..2.0, c: -2.0..2.0)
-      end
-    end
-
     BURN_IN_ITERATIONS =  1_000 # discarded before measuring
     SAMPLE_SIZE        = 20_000 # measured iterations per trial
     GRID_SIZE          =    128 # occupancy raster resolution
@@ -77,7 +52,7 @@ module Orbits
     # the rest — including x0/y0/theta — at the current params.
     private def draw_params(kind : AttractorKind, base : Params, rng : Random) : Params
       params = base.dup
-      ranges = coefficient_ranges(kind)
+      ranges = CoefficientRanges.for(kind)
       if range = ranges.a
         params.a = rng.rand(range)
       end

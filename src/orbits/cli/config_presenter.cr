@@ -91,6 +91,17 @@ module Orbits
             append_argument.call("-s #{@config.width}x#{@config.height}")
           end
           append_argument.call("--xform #{@config.xform.cli_name}") unless @config.xform == Config::DEFAULT_XFORM
+          if animation = @config.animation
+            append_argument.call("--animate #{animation.cli_name}")
+            append_argument.call("--fps #{@config.fps}") unless @config.fps == Config::DEFAULT_FPS
+            append_argument.call("--duration #{@config.duration}") unless @config.duration == Config::DEFAULT_DURATION
+            if animation.trail? && @config.trail_points != Config::DEFAULT_TRAIL_POINTS
+              append_argument.call("--trail #{@config.trail_points}")
+            end
+            if animation.morph? && @config.morph_amount != Config::DEFAULT_MORPH_AMOUNT
+              append_argument.call("--morph-amount #{@config.morph_amount}")
+            end
+          end
         end
       end
 

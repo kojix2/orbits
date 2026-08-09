@@ -1,5 +1,11 @@
 require "../spec_helper"
 
+class TTYMemory < IO::Memory
+  def tty? : Bool
+    true
+  end
+end
+
 describe Orbits::CLI do
   it "parses numeric CLI options into a config" do
     config = Orbits::CLI.parse_config([
@@ -182,6 +188,10 @@ describe Orbits::CLI do
     expect_raises(ArgumentError, "unknown protocol: nope (choose from auto, iterm2, kitty, sixel, braille, shades)") do
       Orbits::CLI.parse_config(["clifford", "--protocol=nope"])
     end
+
+    expect_raises(ArgumentError, "unknown animation mode: nope (choose from reveal, trail, morph)") do
+      Orbits::CLI.parse_config(["clifford", "--animate=nope"])
+    end
   end
 
   it "accepts --detect as a global flag with or without a subcommand" do
@@ -196,6 +206,72 @@ describe Orbits::CLI do
     Orbits::CLI.parse_config(["clifford"]).quiet?.should be_false
     Orbits::CLI.parse_config(["clifford", "--quiet"]).quiet?.should be_true
     Orbits::CLI.parse_config(["clifford", "-q"]).quiet?.should be_true
+  end
+
+  it "parses reveal animation controls" do
+    config = Orbits::CLI.parse_config([
+      "clifford",
+      "--seed=42",
+      "--animate=reveal",
+      "--fps=24",
+      "--duration=2.5",
+    ])
+
+    config.animation.should eq(Orbits::AnimationMode::Reveal)
+    config.fps.should eq(24)
+    config.duration.should eq(2.5)
+  end
+
+  it "parses trail and morph animation controls" do
+    trail = Orbits::CLI.parse_config([
+      "dejong", "--seed=42", "--animate=trail", "--trail=250K",
+    ])
+    morph = Orbits::CLI.parse_config([
+      "ikeda", "--u=0.9", "--animate=morph", "--morph-amount=1.5",
+    ])
+
+    trail.animation.should eq(Orbits::AnimationMode::Trail)
+    trail.trail_points.should eq(250_000)
+    morph.animation.should eq(Orbits::AnimationMode::Morph)
+    morph.morph_amount.should eq(1.5)
+  end
+
+  it "uses animation-specific default point budgets" do
+    reveal = Orbits::CLI.parse_config(["clifford", "--seed=42", "--animate=reveal"])
+    trail = Orbits::CLI.parse_config(["clifford", "--seed=42", "--animate=trail"])
+    morph = Orbits::CLI.parse_config(["clifford", "--seed=42", "--animate=morph"])
+    explicit = Orbits::CLI.parse_config(["clifford", "--seed=42", "--animate=morph", "--points=2M"])
+
+    reveal.points.should eq(Orbits::Config::DEFAULT_POINTS)
+    trail.points.should eq(Orbits::Config::DEFAULT_TRAIL_BUDGET)
+    trail.trail_points.should eq(Orbits::Config::DEFAULT_TRAIL_POINTS)
+    morph.points.should eq(Orbits::Config::DEFAULT_MORPH_POINTS)
+    explicit.points.should eq(2_000_000)
+  end
+
+  it "validates animation controls and output" do
+    expect_raises(ArgumentError, "fps must be positive") do
+      Orbits::CLI.parse_config(["clifford", "--animate=reveal", "--fps=0"])
+    end
+    expect_raises(ArgumentError, "duration must be finite and positive") do
+      Orbits::CLI.parse_config(["clifford", "--animate=reveal", "--duration=0"])
+    end
+    expect_raises(ArgumentError, "animation cannot be combined with --output yet") do
+      Orbits::CLI.parse_config(["clifford", "--animate=reveal", "--output=out.png"])
+    end
+    expect_raises(ArgumentError, "trail point count must be positive") do
+      Orbits::CLI.parse_config(["clifford", "--animate=trail", "--trail=0"])
+    end
+    expect_raises(ArgumentError, /trail point count must not exceed/) do
+      Orbits::CLI.parse_config(["clifford", "--animate=trail", "--trail=11M"])
+    end
+    expect_raises(ArgumentError, "morph amount must be finite and positive") do
+      Orbits::CLI.parse_config(["clifford", "--animate=morph", "--morph-amount=0"])
+    end
+  end
+
+  it "ignores unused animation timing controls for a static render" do
+    Orbits::CLI.parse_config(["clifford", "--fps=0", "--duration=0"]).animation.should be_nil
   end
 
   it "parses text protocols" do
@@ -323,12 +399,14 @@ describe Orbits::CLI do
     config = Orbits::CLI.parse_config(["clifford", "--seed=42"])
 
     config.window.should_not eq(Orbits::AttractorKind::Clifford.default_window)
+    config.window_explicit?.should be_false
   end
 
   it "keeps an explicit window when randomizing" do
     config = Orbits::CLI.parse_config(["clifford", "--seed=42", "--window=-1,1,-1,1"])
 
     config.window.should eq(Orbits::Window.new(-1.0, 1.0, -1.0, 1.0))
+    config.window_explicit?.should be_true
   end
 
   it "prints a reproduce command with non-default render-shaping options" do
@@ -336,12 +414,8 @@ describe Orbits::CLI do
     error = IO::Memory.new
     path = File.tempname("orbits-cli-spec", ".png")
     begin
-      status = Process.run(
-        "crystal",
+      status = Orbits::CLI.run(
         [
-          "run",
-          "src/orbits_cli.cr",
-          "--",
           "clifford",
           "--seed=42",
           "--print-params",
@@ -351,11 +425,11 @@ describe Orbits::CLI do
           "--xform=log",
           "--output=#{path}",
         ],
-        output: output,
-        error: error
+        output,
+        error
       )
 
-      status.success?.should be_true
+      status.should eq(0)
       printed = error.to_s
       printed.should contain("reproduce ->")
       printed.should contain("seed      42")
@@ -381,12 +455,8 @@ describe Orbits::CLI do
     error = IO::Memory.new
     path = File.tempname("orbits-cli-text-spec", ".txt")
     begin
-      status = Process.run(
-        "crystal",
+      status = Orbits::CLI.run(
         [
-          "run",
-          "src/orbits_cli.cr",
-          "--",
           "dejong",
           "--points=1",
           "--size=1x1",
@@ -394,11 +464,11 @@ describe Orbits::CLI do
           "--output=#{path}",
           "--quiet",
         ],
-        output: output,
-        error: error
+        output,
+        error
       )
 
-      status.success?.should be_true
+      status.should eq(0)
       contents = File.read(path)
       contents.should_not start_with("\x89PNG")
       contents.should end_with("\n")
@@ -406,5 +476,42 @@ describe Orbits::CLI do
     ensure
       File.delete(path) if File.exists?(path)
     end
+  end
+
+  it "falls back to one static frame when animation stdout is redirected" do
+    output = IO::Memory.new
+    error = IO::Memory.new
+    status = Orbits::CLI.run(
+      [
+        "clifford",
+        "--seed=42",
+        "--animate=reveal",
+        "--points=10",
+        "--size=4x4",
+        "--protocol=shades",
+        "--quiet",
+      ],
+      output,
+      error
+    )
+
+    status.should eq(0)
+    output.to_s.should_not contain("\e[?1049h")
+    output.to_s.scan(/\e\[H/).size.should eq(0)
+    output.to_s.should end_with("\n")
+  end
+
+  it "reports an automatically reduced morph amount" do
+    output = TTYMemory.new
+    error = TTYMemory.new
+
+    status = Orbits::CLI.run(
+      %w[dejong --seed=7 --animate=morph --points=12 --fps=12 --duration=1 --size=8x8 --protocol=shades --print-params],
+      output,
+      error
+    )
+
+    status.should eq(0)
+    error.to_s.should contain("morph amount adjusted from 1.0 to 0.125")
   end
 end

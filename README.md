@@ -12,6 +12,9 @@ shards build --release -Dexecution_context
 cp bin/orbits ~/.local/bin
 ```
 
+`-Dexecution_context` is required so multi-orbit rendering uses Crystal's
+parallel execution context. The build intentionally fails when it is omitted.
+
 ## Draw
 
 ```sh
@@ -43,6 +46,27 @@ orbits clifford --output orbit.png
 orbits dejong --output orbit.six
 ```
 
+## Animate
+
+Reveal the attractor, follow a moving trail, or morph its coefficients:
+
+```sh
+orbits clifford --seed 42 --animate reveal
+orbits dejong --animate trail --trail 10K --duration 8
+orbits ikeda --u 0.9 --animate morph --morph-amount 1.5
+```
+
+For `reveal` and `trail`, `--points` is the total calculation budget divided
+across the requested duration. `reveal` accumulates all points, while `trail`
+retains only the newest `--trail` points. Their default budgets are 10M and
+100K points, respectively. For `morph`, `--points` is the budget for each
+independent frame; its default is 1M points. Morph previews the full
+coefficient loop once, reduces unstable motion when necessary, and uses one
+fixed window that contains the complete loop. Frames are redrawn in the
+terminal's alternate screen. Press Ctrl-C to stop early and keep the current
+frame. Redirected stdout falls back to one static frame. Animation output files
+are not supported yet.
+
 Display as Unicode text when terminal graphics are unavailable:
 
 ```sh
@@ -65,6 +89,11 @@ precedence. `--colormap turbo` and every other colormap color both text modes.
 --colormap NAME     gray, ice, fire, gr8, turbo
 --protocol NAME     auto, iterm2, kitty, sixel, braille, shades
 --seed N            reproduce random selection
+--animate MODE      reveal, trail, morph
+--fps N             animation frame rate (12)
+--duration SECONDS  animation duration (5)
+--trail N           points retained by trail mode (10K)
+--morph-amount N    coefficient motion multiplier (1.0)
 ```
 
 Attractor coefficients live on their subcommands:

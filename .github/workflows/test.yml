@@ -25,7 +25,7 @@ jobs:
         run: shards install
 
       - name: Run specs
-        run: crystal spec
+        run: crystal spec -Dexecution_context
 
       - name: Build with execution context
         run: make static=0

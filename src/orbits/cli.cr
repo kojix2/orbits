@@ -6,54 +6,79 @@ module Orbits
   module CLI
     extend self
 
-    def run(argv : Array(String)) : Int32
+    def run(argv : Array(String), output : IO = STDOUT, error : IO = STDERR) : Int32
       config = parse_config(argv)
 
       if config.detect_only?
         detection = TermImage::Detector.new.detect
-        puts "protocol: #{detection.protocol.cli_name}"
-        puts "tmux: #{detection.tmux?}"
-        puts "reason: #{detection.reason}"
+        output.puts "protocol: #{detection.protocol.cli_name}"
+        output.puts "tmux: #{detection.tmux?}"
+        output.puts "reason: #{detection.reason}"
         return 0
       end
 
-      ConfigPresenter.new(config).write(STDERR) if config.print_params?
+      ConfigPresenter.new(config).write(error) if config.print_params?
 
-      report_start(config)
+      report_start(config, error, output.tty?)
       started = Time.instant
-      image = Renderer.new(config).render
+      interrupted = false
+      animate = config.animation && output.tty?
+      image = if animate
+                animator = Animator.new(config, output)
+                result = animator.render
+                interrupted = animator.interrupted?
+                report_morph_adjustment(config, animator.effective_morph_amount, error)
+                result
+              else
+                Renderer.new(config).render
+              end
       elapsed = Time.instant - started
 
       if path = config.output
         OutputWriter.new(path, image, config.protocol).write
-        report_done(config, elapsed, "wrote #{path}")
+        report_done(config, elapsed, "wrote #{path}", error)
       else
-        report_done(config, elapsed, "displaying")
-        TermImage.show(image, config.protocol)
+        report_done(config, elapsed, "displaying", error)
+        TermImage.show(image, config.protocol, output)
       end
-      0
+      interrupted ? 130 : 0
     rescue ex : ArgumentError
-      STDERR.puts "[orbits] #{ex.message}"
-      STDERR.puts "Run 'orbits --help' for usage."
+      error.puts "[orbits] #{ex.message}"
+      error.puts "Run 'orbits --help' for usage."
       1
     rescue ex : Exception
-      STDERR.puts "[orbits] #{ex.message}"
+      error.puts "[orbits] #{ex.message}"
       1
     end
 
     # Progress goes to stderr and only when it is a terminal, so it never
     # corrupts piped image bytes or a `--output` file redirect.
-    private def report_start(config : Config) : Nil
-      return if config.quiet? || !STDERR.tty?
+    private def report_start(config : Config, error : IO, output_tty : Bool) : Nil
+      return if config.quiet? || !error.tty?
       orbits = config.orbits == 1 ? "1 orbit" : "#{config.orbits} orbits"
       seed = config.seed ? " — seed #{config.seed}" : ""
-      STDERR.puts "[orbits] rendering #{config.attractor.to_s.downcase} — " \
-                  "#{config.points.format} points, #{orbits}, #{config.width}x#{config.height}#{seed}"
+      animation_active = config.animation && output_tty
+      action = animation_active ? "animating" : "rendering"
+      animation = if animation_active && (mode = config.animation)
+                    ", #{mode.cli_name}, #{config.fps} fps for #{config.duration}s"
+                  else
+                    ""
+                  end
+      error.puts "[orbits] #{action} #{config.attractor.to_s.downcase} — " \
+                 "#{config.points.format} points, #{orbits}, #{config.width}x#{config.height}#{animation}#{seed}"
     end
 
-    private def report_done(config : Config, elapsed : Time::Span, action : String) : Nil
-      return if config.quiet? || !STDERR.tty?
-      STDERR.puts "[orbits] done in #{elapsed.total_seconds.round(2)}s (#{action})"
+    private def report_done(config : Config, elapsed : Time::Span, action : String, error : IO) : Nil
+      return if config.quiet? || !error.tty?
+      error.puts "[orbits] done in #{elapsed.total_seconds.round(2)}s (#{action})"
+    end
+
+    private def report_morph_adjustment(config : Config, amount : Float64?, error : IO) : Nil
+      return unless amount && amount < config.morph_amount
+      show_adjustment = config.print_params? || (!config.quiet? && error.tty?)
+      return unless show_adjustment
+
+      error.puts "[orbits] morph amount adjusted from #{config.morph_amount} to #{amount} to keep the loop visible"
     end
 
     # Column at which option descriptions align in help output.
@@ -87,6 +112,9 @@ module Orbits
         opts.separator "  orbits clifford --points 10M --orbits 4 --colormap fire"
         opts.separator "  orbits ikeda --u 0.9 --points 5M"
         opts.separator "  orbits --seed 42 --protocol shades --colormap turbo"
+        opts.separator "  orbits clifford --seed 42 --animate reveal --duration 5"
+        opts.separator "  orbits dejong --animate trail --trail 10K"
+        opts.separator "  orbits ikeda --u 0.9 --animate morph --morph-amount 1.5"
         opts.unknown_args do |before_dash, after_dash|
           unknown = before_dash.first? || after_dash.first?
           raise ArgumentError.new("unknown argument: #{unknown}") if unknown
@@ -95,6 +123,7 @@ module Orbits
 
       parser.parse(argv)
 
+      apply_animation_defaults(config, state)
       apply_protocol_default_size(config, state) unless config.detect_only?
       apply_random_selection(config, state) unless config.detect_only?
       config.validate!
@@ -105,6 +134,7 @@ module Orbits
       property? attractor_selected = false
       property? colormap_set = false
       property? randomize_params = true
+      property? points_set = false
       property? size_set = false
       property? window_set = false
       property seed : UInt64? = nil
@@ -169,8 +199,14 @@ module Orbits
       opts.separator "Common options:"
 
       # Sampling: how many points to iterate, and across how many orbits.
-      opts.on("-n", "--points N", "Total point count, K/M/G ok (default: #{humanize_count(config.points)})") { |v| config.points = parse_count(v) }
-      opts.on("--iterations N", "Alias for --points") { |v| config.points = parse_count(v) }
+      opts.on("-n", "--points N", "Point budget, K/M/G ok (default: #{humanize_count(config.points)})") do |v|
+        config.points = parse_count(v)
+        state.points_set = true
+      end
+      opts.on("--iterations N", "Alias for --points") do |v|
+        config.points = parse_count(v)
+        state.points_set = true
+      end
       opts.on("--orbits N", "Number of independent orbits (default: #{config.orbits})") { |v| config.orbits = v.to_i }
 
       # Framing: pixel resolution and the world-coordinate region it maps to.
@@ -182,6 +218,7 @@ module Orbits
       end
       opts.on("--window X1,X2,Y1,Y2", "Override the world-coordinate window") do |v|
         config.window = parse_window(v)
+        config.window_explicit = true
         state.window_set = true
       end
 
@@ -200,6 +237,20 @@ module Orbits
       opts.on("--seed N", "Seed random selection") { |v| state.seed = v.to_u64 }
       opts.on("--print-params", "Print selected parameters to stderr") { config.print_params = true }
       opts.on("-q", "--quiet", "Suppress the render status on stderr") { config.quiet = true }
+
+      # Animation: shared timing plus controls specific to trail and morph.
+      opts.separator ""
+      opts.separator "Animation:"
+      opts.separator "  Point defaults: reveal 10M total; trail 100K total; morph 1M/frame"
+      opts.on("--animate MODE", "Animate in place: reveal, trail, morph") { |v| config.animation = AnimationMode.parse(v) }
+      opts.on("--fps N", "Animation frame rate (default: #{config.fps})") { |v| config.fps = v.to_i }
+      opts.on("--duration SECONDS", "Animation duration (default: #{config.duration})") { |v| config.duration = v.to_f64 }
+      opts.on("--trail N", "Points retained by trail mode (default: #{humanize_count(config.trail_points)})") do |v|
+        config.trail_points = parse_count(v)
+      end
+      opts.on("--morph-amount N", "Morph amplitude multiplier (default: #{config.morph_amount})") do |v|
+        config.morph_amount = v.to_f64
+      end
     end
 
     private def add_abcd_options(opts : OptionParser, config : Config, state : ParseState) : Nil
@@ -240,6 +291,17 @@ module Orbits
       config.attractor = attractor
       config.params = attractor.default_params
       config.window = attractor.default_window unless state.window_set?
+    end
+
+    private def apply_animation_defaults(config : Config, state : ParseState) : Nil
+      return if state.points_set?
+
+      case config.animation
+      when AnimationMode::Trail
+        config.points = Config::DEFAULT_TRAIL_BUDGET
+      when AnimationMode::Morph
+        config.points = Config::DEFAULT_MORPH_POINTS
+      end
     end
 
     # Subcommand banner: the attractor's name, its iteration formula, then the
